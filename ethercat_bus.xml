@@ -281,8 +281,18 @@
               <DataType>UINT8</DataType>
             </Entry>
             <Entry>
-              <Index>#x0000</Index>
-              <BitLen>8</BitLen>
+              <Index>#x6083</Index>
+              <SubIndex>0</SubIndex>
+              <BitLen>32</BitLen>
+              <Name></Name>
+              <DataType>UINT32</DataType>
+            </Entry>
+            <Entry>
+              <Index>#x6084</Index>
+              <SubIndex>0</SubIndex>
+              <BitLen>32</BitLen>
+              <Name></Name>
+              <DataType>UINT32</DataType>
             </Entry>
           </RxPdo>
           <TxPdo Sm="3" Fixed="1" Mandatory="1">
@@ -315,10 +325,6 @@
               <BitLen>8</BitLen>
               <Name></Name>
               <DataType>UINT8</DataType>
-            </Entry>
-            <Entry>
-              <Index>#x0000</Index>
-              <BitLen>8</BitLen>
             </Entry>
           </TxPdo>
         </Device>

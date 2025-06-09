@@ -76,19 +76,19 @@ ec_pdo_entry_info_t slave_3_pdo_entries[] = {
     {0x607a, 0x00, 32},
     {0x60ff, 0x00, 32},
     {0x6060, 0x00, 8},
-    {0x0000, 0x00, 8}, /* Gap */
+    {0x6083, 0x00, 32},
+    {0x6084, 0x00, 32},
     {0x6041, 0x00, 16},
     {0x6064, 0x00, 32},
     {0x606c, 0x00, 32},
     {0x6061, 0x00, 8},
-    {0x0000, 0x00, 8}, /* Gap */
 };
 
 ec_pdo_info_t slave_3_pdos[] = {
     {0x1a01, 0, NULL}, /* TxPDO 2 */
     {0x1601, 1, slave_3_pdo_entries + 0}, /* RxPDO 2 */
-    {0x1600, 5, slave_3_pdo_entries + 1},
-    {0x1a00, 5, slave_3_pdo_entries + 6},
+    {0x1600, 6, slave_3_pdo_entries + 1},
+    {0x1a00, 4, slave_3_pdo_entries + 7},
 };
 
 ec_sync_info_t slave_3_syncs[] = {

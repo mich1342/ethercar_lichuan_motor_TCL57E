@@ -91,6 +91,9 @@ static unsigned int off_motor_operation_status;
 static unsigned int off_motor_control_word;
 static unsigned int off_motor_control_status;
 static unsigned int off_motor_target_velocity;
+static unsigned int off_motor_actual_velocity;
+static unsigned int off_motor_target_acceleration;
+static unsigned int off_motor_target_deacceleration;
 
 const static ec_pdo_entry_reg_t domain1_regs[] = {
     {DigInSlavePos,  Beckhoff_EL1008, 0x6000, 1, &off_dig_in},
@@ -100,9 +103,10 @@ const static ec_pdo_entry_reg_t domain1_regs[] = {
     {MotorSlavePos, Lichuan_TLC57E, 0x6060, 0, &off_motor_operation_mode},
     {MotorSlavePos, Lichuan_TLC57E, 0x6061, 0, &off_motor_operation_status},
     {MotorSlavePos, Lichuan_TLC57E, 0x60ff, 0, &off_motor_target_velocity},
+    {MotorSlavePos, Lichuan_TLC57E, 0x606c, 0, &off_motor_actual_velocity},
+    {MotorSlavePos, Lichuan_TLC57E, 0x6083, 0, &off_motor_target_acceleration},
+    {MotorSlavePos, Lichuan_TLC57E, 0x6084, 0, &off_motor_target_deacceleration},
     // {MotorSlavePos, Lichuan_TLC57E, 0x603f, 0, &off_motor_error_code},
-    // {MotorSlavePos, Lichuan_TLC57E, 0x6083, 0, &off_motor_acceleration},
-    // {MotorSlavePos, Lichuan_TLC57E, 0x6084, 0, &off_motor_deacceleration},
 };
 
 /* Master 0, Slave 1, "EL1008"
@@ -178,24 +182,24 @@ ec_sync_info_t slave_2_syncs[] = {
  */
 
 ec_pdo_entry_info_t slave_3_pdo_entries[] = {
-    {0x6060, 0x00, 8}, /* Modes of operation */
-    {0x6040, 0x00, 16},
-    {0x607a, 0x00, 32},
-    {0x60ff, 0x00, 32},
-    {0x6060, 0x00, 8},
-    {0x0000, 0x00, 8}, /* Gap */
-    {0x6041, 0x00, 16},
-    {0x6064, 0x00, 32},
-    {0x606c, 0x00, 32},
-    {0x6061, 0x00, 8},
-    {0x0000, 0x00, 8}, /* Gap */
+    {0x6040, 0x00, 16}, /* Control Word Output */
+    {0x607a, 0x00, 32}, /* Target Position Output */
+    {0x60ff, 0x00, 32}, /* Target Velocity Output */
+    {0x6060, 0x00, 8},  /* Modes of operation Output */
+    {0x6083, 0x00, 32}, /* Target Acceleration Output */
+    {0x6084, 0x00, 32}, /* Target Deacceleration Output */
+    {0x6041, 0x00, 16}, /* Status Word Input*/ 
+    {0x6064, 0x00, 32}, /* Actual Position Input */
+    {0x606c, 0x00, 32}, /* Actual Velocity Input */
+    {0x6061, 0x00, 8},  /* Modes of operation Input */
+  
 };
 
 ec_pdo_info_t slave_3_pdos[] = {
     {0x1a01, 0, NULL}, /* TxPDO 2 */
-    {0x1601, 1, slave_3_pdo_entries + 0}, /* RxPDO 2 */
-    {0x1600, 5, slave_3_pdo_entries + 1},
-    {0x1a00, 5, slave_3_pdo_entries + 6},
+    {0x1601, 0, slave_3_pdo_entries + 0}, /* RxPDO 2 */
+    {0x1600, 6, slave_3_pdo_entries + 0},
+    {0x1a00, 4, slave_3_pdo_entries + 6},
 };
 
 ec_sync_info_t slave_3_syncs[] = {
@@ -220,7 +224,10 @@ static unsigned int prev_state = -1;
 
 static unsigned int motor_control_status = 255;
 static unsigned short int motor_operation_status = 255;
-static unsigned int motor_speed = 0;
+static long motor_velocity = 0;
+static long motor_actual_velocity = 0;
+
+static bool fast_mode = false; // Set to true for fast mode, false for slow mode
 /****************************************************************************/
 
 void check_domain1_state(void)
@@ -274,19 +281,42 @@ void cyclic_task()
     motor_control_status = 255;
     motor_operation_status = EC_READ_U8(domain1_pd + off_motor_operation_status);
     motor_control_status = EC_READ_U16(domain1_pd + off_motor_control_status);
-    
+    motor_actual_velocity = EC_READ_S32(domain1_pd + off_motor_actual_velocity);
+
+    unsigned short int dig_in = EC_READ_U8(domain1_pd + off_dig_in);
     bool execute_shared_counter = false;
+
     if (shared_counter) {
         shared_counter--;
     } else { // do this at 1 Hz
         shared_counter = 1000;
         execute_shared_counter = true;
         check_master_state();
-        motor_speed += 10000;
-        if (motor_speed > 150000) {
-            motor_speed = 0;
-        }
     }
+    motor_velocity = 0;
+    if(dig_in & (1 << 1)) {
+        motor_velocity = 10000;
+    } 
+    if (dig_in & (1 << 0)) {
+        motor_velocity = -10000;
+    }
+
+    if (dig_in & (1 << 2)) {
+        motor_velocity = 40000;
+    }
+
+    if (dig_in & (1 << 6)) {
+        EC_WRITE_U32(domain1_pd + off_motor_target_acceleration, 50000);
+        EC_WRITE_U32(domain1_pd + off_motor_target_deacceleration, 50000);
+        fast_mode = true;
+    }
+    
+    if (dig_in & (1 << 7)) {
+        EC_WRITE_U32(domain1_pd + off_motor_target_acceleration, 100);
+        EC_WRITE_U32(domain1_pd + off_motor_target_deacceleration, 100);
+        fast_mode = false;
+    }
+
 
     switch (state)
     {
@@ -304,8 +334,8 @@ void cyclic_task()
             // state = 10;
         }
         if (motor_control_status != 0){
-            state = 10;
         }
+        state = 10;
         break;
     case 10:
         if(state != prev_state) {
@@ -325,7 +355,7 @@ void cyclic_task()
             << std::endl;
         }
         
-        EC_WRITE_U8(domain1_pd + off_motor_operation_mode, 0x3); // Set motor to velocity mode
+        EC_WRITE_U8(domain1_pd + off_motor_operation_mode, 3); // Set motor to velocity mode
         break;
     case 11:
         if(state != prev_state) {
@@ -338,11 +368,11 @@ void cyclic_task()
             std::cout << "[State " << state << "]"<< " Motor Status: " 
             << std::bitset<16>(motor_control_status) 
             << std::endl;
-            if (motor_operation_status != 0x03) {
-                state = 12;
-            }
         }
         EC_WRITE_U16(domain1_pd + off_motor_control_word, 0x6); // Set motor to velocity mode
+        if (motor_operation_status == 0x03) {
+            state = 12;
+        }
         break;
     case 12:
         if(state != prev_state) {
@@ -354,11 +384,11 @@ void cyclic_task()
             std::cout << "[State " << state << "]"<< " Motor Status: " 
             << std::bitset<16>(motor_control_status) 
             << std::endl;
-            if (motor_operation_status != 0x03) {
-                state = 13;
-            }
         }
         EC_WRITE_U16(domain1_pd + off_motor_control_word, 0x7); // Set motor to velocity mode
+        if (motor_operation_status == 0x03) {
+            state = 13;
+        }
         break;
     case 13:
         if(state != prev_state) {
@@ -366,19 +396,17 @@ void cyclic_task()
             prev_state = state;
         }
        
-        if(motor_operation_status == 0x03){
-            state = 1000;
-        }
         if (execute_shared_counter) {
             std::cout << "[State " << state << "]"<< " Motor Operation Status: " << motor_operation_status << std::endl;
             std::cout << "[State " << state << "]"<< " Motor Status: " 
             << std::bitset<16>(motor_control_status) 
             << std::endl;
-            if (motor_operation_status != 0x03) {
-                state = 10;
-            }
         }
         EC_WRITE_U16(domain1_pd + off_motor_control_word, 0xF); // Set motor to velocity mode
+        if(motor_operation_status == 0x03){
+            state = 1000;
+        }
+
         break;
     case 1000:
         if(state != prev_state) {
@@ -389,14 +417,27 @@ void cyclic_task()
         if (execute_shared_counter) {
             std::cout << "[State " << state << "]"<< " Motor Operation Status: " << motor_operation_status << std::endl;
             std::cout << "[State " << state << "]"<< " Motor Status: " 
-            << std::bitset<16>(motor_control_status) 
-            << std::endl;
+                << std::bitset<16>(motor_control_status) 
+                << std::endl;
+            std::cout << "[State " << state << "]"<< " Motor Actual Velocity: " << motor_actual_velocity << std::endl;
+            std::cout << "[State " << state << "]"<< " Motor Target Velocity: " << motor_velocity << std::endl;
+            std::cout << "[State " << state << "]"<< " Fast Mode: " << (fast_mode ? "Enabled" : "Disabled") << std::endl;
         }
-        EC_WRITE_U32(domain1_pd + off_motor_target_velocity, 2000);
+        EC_WRITE_S32(domain1_pd + off_motor_target_velocity, motor_velocity);
         break;
     
-    }
+    }  
 
+    if (execute_shared_counter) {
+        std::cout << "#######################################" << std::endl;
+        std::cout << "Digital Input: " 
+                  << std::bitset<8>(dig_in) 
+                  << std::endl;
+    }
+    unsigned short int dig_out_val = 0;
+    dig_out_val = dig_out_val | (1 << 7);
+    dig_out_val = dig_out_val | (fast_mode << 0);
+    EC_WRITE_U8(domain1_pd + off_dig_out, dig_out_val);
     ecrt_domain_queue(domain1);
     ecrt_master_send(master);
 }
