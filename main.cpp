@@ -239,10 +239,10 @@ void inline check_domain1_state(void)
     ecrt_domain_state(domain1, &ds);
 
     if (ds.working_counter != domain1_state.working_counter) {
-        printf("Domain1: WC %u.\n", ds.working_counter);
+        std::cout << "Domain1: WC " << ds.working_counter << "." << std::endl;
     }
     if (ds.wc_state != domain1_state.wc_state) {
-        printf("Domain1: State %u.\n", ds.wc_state);
+        std::cout << "Domain1: State " << ds.wc_state << "." << std::endl;
     }
 
     domain1_state = ds;
