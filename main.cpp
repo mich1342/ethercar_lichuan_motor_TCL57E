@@ -42,8 +42,10 @@
 
 /* Constants */
 #define NSEC_PER_SEC (1000000000L)
-#define FREQUENCY 1000
-
+#define FREQUENCY 5000
+#define ACCEL_DECCEL 100000
+#define MAX_SPEED 100000
+#define SPEED_SLOPE 2
 /****************************************************************************/
 
 /** Task period in ns. */
@@ -94,7 +96,7 @@ static unsigned int off_motor_target_velocity;
 static unsigned int off_motor_actual_velocity;
 static unsigned int off_motor_target_acceleration;
 static unsigned int off_motor_target_deacceleration;
-
+static short multiplier = 10;
 const static ec_pdo_entry_reg_t domain1_regs[] = {
     {DigInSlavePos,  Beckhoff_EL1008, 0x6000, 1, &off_dig_in},
     {DigOutSlavePos, Beckhoff_EL2008, 0x7000, 1, &off_dig_out},
@@ -230,7 +232,7 @@ static long motor_actual_velocity = 0;
 static bool fast_mode = false; // Set to true for fast mode, false for slow mode
 /****************************************************************************/
 
-void check_domain1_state(void)
+void inline check_domain1_state(void)
 {
     ec_domain_state_t ds;
 
@@ -248,7 +250,7 @@ void check_domain1_state(void)
 
 /****************************************************************************/
 
-void check_master_state(void)
+void inline check_master_state(void)
 {
     ec_master_state_t ms;
 
@@ -269,7 +271,7 @@ void check_master_state(void)
 
 /****************************************************************************/
 
-void cyclic_task()
+void inline cyclic_task()
 {
     // receive process data
     ecrt_master_receive(master);
@@ -289,33 +291,33 @@ void cyclic_task()
     if (shared_counter) {
         shared_counter--;
     } else { // do this at 1 Hz
-        shared_counter = 1000;
+        shared_counter = FREQUENCY;
         execute_shared_counter = true;
         check_master_state();
     }
-    motor_velocity = 0;
-    if(dig_in & (1 << 1)) {
-        motor_velocity = 10000;
-    } 
-    if (dig_in & (1 << 0)) {
-        motor_velocity = -10000;
-    }
+    // motor_velocity = 0;
+    // if(dig_in & (1 << 1)) {
+    //     motor_velocity = 10000;
+    // } 
+    // if (dig_in & (1 << 0)) {
+    //     motor_velocity = -10000;
+    // }
 
-    if (dig_in & (1 << 2)) {
-        motor_velocity = 40000;
-    }
+    // if (dig_in & (1 << 2)) {
+    //     motor_velocity = 40000;
+    // }
 
-    if (dig_in & (1 << 6)) {
-        EC_WRITE_U32(domain1_pd + off_motor_target_acceleration, 50000);
-        EC_WRITE_U32(domain1_pd + off_motor_target_deacceleration, 50000);
-        fast_mode = true;
-    }
+    // if (dig_in & (1 << 6)) {
+    //     EC_WRITE_U32(domain1_pd + off_motor_target_acceleration, 50000);
+    //     EC_WRITE_U32(domain1_pd + off_motor_target_deacceleration, 50000);
+    //     fast_mode = true;
+    // }
     
-    if (dig_in & (1 << 7)) {
-        EC_WRITE_U32(domain1_pd + off_motor_target_acceleration, 100);
-        EC_WRITE_U32(domain1_pd + off_motor_target_deacceleration, 100);
-        fast_mode = false;
-    }
+    // if (dig_in & (1 << 7)) {
+    //     EC_WRITE_U32(domain1_pd + off_motor_target_acceleration, 100);
+    //     EC_WRITE_U32(domain1_pd + off_motor_target_deacceleration, 100);
+    //     fast_mode = false;
+    // }
 
 
     switch (state)
@@ -323,16 +325,13 @@ void cyclic_task()
     case 0:
         if(state != prev_state) {
             std::cout << "State 0: Reset the drive." << std::endl;
+            std::cout << "[State " << state << "]"<< " Motor Operation Status: " << motor_operation_status << std::endl;
             prev_state = state;
         }
         EC_WRITE_U16(domain1_pd + off_motor_control_word, 0x0); 
         std::cout << "[State " << state << "]"<< " Motor Status: " 
                   << std::bitset<16>(motor_control_status) 
                   << std::endl;
-        if (execute_shared_counter) {
-            std::cout << "[State " << state << "]"<< " Motor Operation Status: " << motor_operation_status << std::endl;
-            // state = 10;
-        }
         if (motor_control_status != 0){
         }
         state = 10;
@@ -340,36 +339,32 @@ void cyclic_task()
     case 10:
         if(state != prev_state) {
             std::cout << "State " << state << ": Set Motor Operation Mode to Velocity." << std::endl;
-            prev_state = state;
-        }
-        
-        if(motor_operation_status == 0x03){
-            state = 11;
-        }
-        if (execute_shared_counter) {
             std::cout << "[State " << state << "] "<< "#################################" << std::endl;
             std::cout << "[State " << state << "]"<< " Sent Motor Operation Command (0x6060): " << std::bitset<8>(EC_READ_U8(domain1_pd + off_motor_operation_mode)) << std::endl;
             std::cout << "[State " << state << "]"<< " Motor Operation Status (0x6061): " << std::bitset<8>(motor_operation_status) << std::endl;
             std::cout << "[State " << state << "]"<< " Motor Control Status (0x6041): " 
             << std::bitset<16>(motor_control_status) 
             << std::endl;
+            EC_WRITE_U8(domain1_pd + off_motor_operation_mode, 3); // Set motor to velocity mode
+            prev_state = state;
+            break;
         }
         
-        EC_WRITE_U8(domain1_pd + off_motor_operation_mode, 3); // Set motor to velocity mode
+        if(motor_operation_status == 0x03){
+            state = 11;
+        }        
         break;
     case 11:
         if(state != prev_state) {
             std::cout << "State " << state << ": Set 0x6 to 0x6040" << std::endl;
             prev_state = state;
-        }
-        
-        if (execute_shared_counter) {
             std::cout << "[State " << state << "]"<< " Motor Operation Status: " << motor_operation_status << std::endl;
             std::cout << "[State " << state << "]"<< " Motor Status: " 
             << std::bitset<16>(motor_control_status) 
             << std::endl;
+            EC_WRITE_U16(domain1_pd + off_motor_control_word, 0x6); // Set motor to velocity mode
+            break;
         }
-        EC_WRITE_U16(domain1_pd + off_motor_control_word, 0x6); // Set motor to velocity mode
         if (motor_operation_status == 0x03) {
             state = 12;
         }
@@ -378,14 +373,13 @@ void cyclic_task()
         if(state != prev_state) {
             std::cout << "State " << state << ": Set 0x7 to 0x6040" << std::endl;
             prev_state = state;
-        }
-        if (execute_shared_counter) {
             std::cout << "[State " << state << "]"<< " Motor Operation Status: " << motor_operation_status << std::endl;
             std::cout << "[State " << state << "]"<< " Motor Status: " 
             << std::bitset<16>(motor_control_status) 
             << std::endl;
+            EC_WRITE_U16(domain1_pd + off_motor_control_word, 0x7); // Set motor to velocity mode
+            break;
         }
-        EC_WRITE_U16(domain1_pd + off_motor_control_word, 0x7); // Set motor to velocity mode
         if (motor_operation_status == 0x03) {
             state = 13;
         }
@@ -393,20 +387,19 @@ void cyclic_task()
     case 13:
         if(state != prev_state) {
             std::cout << "State " << state << ": Set 0xF to 0x6040" << std::endl;
-            prev_state = state;
-        }
-       
-        if (execute_shared_counter) {
             std::cout << "[State " << state << "]"<< " Motor Operation Status: " << motor_operation_status << std::endl;
             std::cout << "[State " << state << "]"<< " Motor Status: " 
             << std::bitset<16>(motor_control_status) 
             << std::endl;
-        }
-        EC_WRITE_U16(domain1_pd + off_motor_control_word, 0xF); // Set motor to velocity mode
+            EC_WRITE_U16(domain1_pd + off_motor_control_word, 0xF); // Set motor to velocity mode
+            EC_WRITE_U32(domain1_pd + off_motor_target_acceleration, ACCEL_DECCEL);
+            EC_WRITE_U32(domain1_pd + off_motor_target_deacceleration, ACCEL_DECCEL);
+            prev_state = state;
+            break;
+        }       
         if(motor_operation_status == 0x03){
             state = 1000;
         }
-
         break;
     case 1000:
         if(state != prev_state) {
@@ -421,7 +414,14 @@ void cyclic_task()
                 << std::endl;
             std::cout << "[State " << state << "]"<< " Motor Actual Velocity: " << motor_actual_velocity << std::endl;
             std::cout << "[State " << state << "]"<< " Motor Target Velocity: " << motor_velocity << std::endl;
-            std::cout << "[State " << state << "]"<< " Fast Mode: " << (fast_mode ? "Enabled" : "Disabled") << std::endl;
+            std::cout << "[State " << state << "]"<< " Fast Mode: " << (fast_mode ? "Enabled" : "Disabled") << std::endl; 
+        }
+        motor_velocity = motor_velocity + multiplier * SPEED_SLOPE; // Increase or decrease speed by 1000 every cycle
+        if (motor_velocity > MAX_SPEED){
+            multiplier = -1;
+        }
+        if (motor_velocity < -MAX_SPEED){
+            multiplier = 1;
         }
         EC_WRITE_S32(domain1_pd + off_motor_target_velocity, motor_velocity);
         break;
@@ -444,7 +444,7 @@ void cyclic_task()
 
 /****************************************************************************/
 
-void stack_prefault(void)
+void inline stack_prefault(void)
 {
     unsigned char dummy[MAX_SAFE_STACK];
 
@@ -454,7 +454,10 @@ void stack_prefault(void)
 /****************************************************************************/
 
 int main(int argc, char **argv)
-{
+{   
+    std::ios_base::sync_with_stdio(false);
+    std::cin.tie(NULL);
+    std::cout.tie(NULL);
     ec_slave_config_t *sc;
     struct timespec wakeup_time;
     int ret = 0;
